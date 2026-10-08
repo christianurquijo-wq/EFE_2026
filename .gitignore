@@ -1,0 +1,21 @@
+# Entorno
+.venv/
+__pycache__/
+*.pyc
+
+# Secretos: nunca al repo
+.env
+*.json
+!.vscode/settings.json
+
+# Datos y salidas locales
+*.csv
+*.xlsx
+*.pdf
+*.png
+*.jpg
+logs/
+
+# Sistema / editor
+.DS_Store
+Thumbs.db
