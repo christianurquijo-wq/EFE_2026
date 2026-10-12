@@ -1,18 +1,24 @@
+
 import os
 import glob
-import subprocess
 import sys
 
+# oct-2026 (panel de operaciones): cada script se ejecuta a través de
+# ops_logger, que deja una fila por script en LOG_EJECUCIONES y avisa fallos.
+# La lógica de selección (exclusiones + Mantenimiento_appends primero) NO cambia.
+from ops_logger import ejecutar, alertar_resumen
 
 scripts_listados = sorted(glob.glob("*.py"))
 
 archivos_excluidos = ['trigger.py',
+                      'ops_logger.py',          # ejecutor/bitácora, no es un ETL
+                      'trigger_bitacora.py',    # las bitácoras ya corren aquí directo; antes se ejecutaban 2 veces
                       'Append Colsubsidio2026.py',
-                      'Formacion InAv Suba2026.py', 
+                      'Formacion InAv Suba2026.py',
                       'Formacion basico Suba2026.py',
-                      'GenerarDashEco.py', 
-                      'Limpieza_caracterizacion.py', 
-                      'Limpieza_empleabilidad.py', 
+                      'GenerarDashEco.py',
+                      'Limpieza_caracterizacion.py',
+                      'Limpieza_empleabilidad.py',
                       'Limpieza_satisfaccion.py',
                       'DashEco.py',
                       'validacion_dataframes.py',
@@ -34,24 +40,23 @@ for script in scripts_listados:
 
 print(f"Ejecutando los siguientes códigos: {scripts_ejecutables}. Total: {len(scripts_ejecutables)}")
 
+LOTE = os.getenv("OPS_LOTE", "nocturno")
 Barra = "="*60
-scrpits_fallidos = {}
+scrpits_fallidos = []
 for script in scripts_ejecutables:
-    try:
-        if script == script_prioridad:
-            print(f"{Barra}\nAPPEND\n{Barra}")
-
-        print(f"\n\nIniciando ejecución: {script}")
-        subprocess.run([sys.executable, script], check=True)
-        print(f"{script} ejecutado correctamente")
-    except subprocess.CalledProcessError as error:
-        print(f"Hubo un problema con la ejecución del script '{script}' asociado a {error}")
-        scrpits_fallidos[script] = str(error)
-        continue
+    if script == script_prioridad:
+        print(f"{Barra}\nAPPEND\n{Barra}")
+    resultado = ejecutar(script, lote=LOTE, timeout_min=30, alertar=False)
+    if resultado["estado"] != "EXITOSO":
+        scrpits_fallidos.append(resultado)
 
 if len(scrpits_fallidos) == 0:
     print("Actualización total de los scripts")
 else:
-    print(f"Actualización finalizada pero hubo un problema con los siguientes scripts. Total fallas {len(scrpits_fallidos)}") 
-    for fallido, detalle in scrpits_fallidos.items():
-        print(f" - {fallido}: {detalle}") 
+    print(f"Actualización finalizada pero hubo un problema con los siguientes scripts. Total fallas {len(scrpits_fallidos)}")
+    for fallido in scrpits_fallidos:
+        print(f" - {fallido['script']}: {fallido['estado']}")
+    alertar_resumen(LOTE, scrpits_fallidos)
+    # Antes el job siempre terminaba en verde aunque fallaran scripts.
+    # Ahora queda en rojo en GitHub para que el fallo sea visible.
+    sys.exit(1)

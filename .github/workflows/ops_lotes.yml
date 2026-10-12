@@ -1,0 +1,77 @@
+# SOLO para el repo EFE_2026 -> va en .github/workflows/ops_lotes.yml
+# Reemplaza schedule_trigger.yml y schedule_trigger_bitacora.yml del repo de Sebastián.
+#
+# MIGRACIÓN GRADUAL: los crons están COMENTADOS. Actívalos (quita los #)
+# solo cuando hayas probado los lotes con el botón y APAGADO los workflows
+# del repo ProyectDash -- si ambos quedan activos, las cargas corren 2 veces.
+name: OPS · Lotes programados
+run-name: "Lote ${{ inputs.lote || 'programado' }} · ${{ inputs.origen || 'cron' }} · ${{ inputs.request_id }}"
+
+on:
+  # schedule:
+  #   - cron: "0 4 * * *"    # 23:00 Bogotá -> lote nocturno
+  #   - cron: "30 14 * * *"  # 09:30 Bogotá -> bitácoras
+  workflow_dispatch:
+    inputs:
+      lote:
+        type: choice
+        options: [nocturno, bitacoras]
+        default: nocturno
+      origen:
+        type: string
+        default: manual_github
+      actor:
+        type: string
+        default: ""
+      request_id:
+        type: string
+        default: ""
+
+concurrency:
+  group: ops-lote-${{ inputs.lote || github.event.schedule }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  lote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install google-auth requests
+      - name: Restaurar archivos secretos
+        env:
+          SECRETS_BUNDLE: ${{ secrets.SECRETS_BUNDLE }}
+        run: |
+          echo "$SECRETS_BUNDLE" | base64 -d > "$RUNNER_TEMP/s.zip"
+          unzip -oq "$RUNNER_TEMP/s.zip" -d .
+          rm -f "$RUNNER_TEMP/s.zip"
+      - name: Ejecutar lote
+        env:
+          LOTE_INPUT: ${{ inputs.lote }}
+          CRON: ${{ github.event.schedule }}
+          OPS_ORIGEN: ${{ inputs.origen || 'cron' }}
+          OPS_ACTOR: ${{ inputs.actor || 'cron' }}
+          OPS_REQUEST_ID: ${{ inputs.request_id }}
+          OPS_SHEET_ID: ${{ secrets.OPS_SHEET_ID }}
+          OPS_LOG_SA_JSON: ${{ secrets.OPS_LOG_SA_JSON }}
+          OPS_ALERT_WEBHOOK: ${{ secrets.OPS_ALERT_WEBHOOK }}
+          OPS_ALERT_TOKEN: ${{ secrets.OPS_ALERT_TOKEN }}
+        run: |
+          if [ "$LOTE_INPUT" = "bitacoras" ] || [ "$CRON" = "30 14 * * *" ]; then
+            export OPS_LOTE=bitacoras
+            python trigger_bitacora.py
+          else
+            export OPS_LOTE=nocturno
+            python trigger.py
+          fi
