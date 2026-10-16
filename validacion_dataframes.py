@@ -2,9 +2,15 @@ import sys
 from google.cloud.exceptions import NotFound
 
 def validar_y_comparar(nombre_base_sheets, df, client_bq, table_ref):
+    # oct-2026: si el DataFrame se filtró (dropna, etc.) su índice queda con huecos y
+    # pandas/pyarrow lo sube a BigQuery como columna extra "__index_level_0__".
+    # Se reinicia el índice (in place: afecta al DF que luego se carga) y se ignoran
+    # esas columnas basura en la tabla actual; el WRITE_TRUNCATE las elimina.
+    df.reset_index(drop=True, inplace=True)
     try:
         tabla_bq = client_bq.get_table(table_ref)
-        columnas_bq = [campo.name for campo in tabla_bq.schema]
+        columnas_bq = [campo.name for campo in tabla_bq.schema
+                       if not campo.name.startswith("__index_level_")]
     except NotFound:
         print(f"la tabla: {table_ref} no existe en el confunto de datos de BQ")
         print(f"saltando la validación y resubiendo la Tabla automáticamente")
