@@ -1,21 +1,33 @@
-# Entorno
+# ============================================================
+# Repo EFE (EFE_2026) - incluye 512, Instancias_Colsubsidio,
+# VACANTES, ConsultaAdres y Divisor-documentos-acj (oct-2026)
+# ============================================================
+
+# Entornos (viven en C:\venvs\efe, fuera del repo)
 .venv/
+venv/
+env/
 __pycache__/
 *.pyc
+.pytest_cache/
+.vscode/
 
-# Secretos: nunca al repo
+# Secretos: NUNCA al repo (en Actions llegan por SECRETS_BUNDLE)
 .env
 *.json
-!.vscode/settings.json
+*.json.key
+credentials/
 
-# Datos y salidas locales
+# Datos personales y salidas locales (cedulas, capturas ADRES, SQL con casos, reportes)
 *.csv
 *.xlsx
 *.pdf
 *.png
 *.jpg
+*.sql
+screenshots/
 logs/
 
-# Sistema / editor
+# Sistema
 .DS_Store
 Thumbs.db

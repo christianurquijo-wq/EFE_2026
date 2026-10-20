@@ -1,0 +1,11 @@
+# VACANTES (main.py = JAE, ECO.py = ECO) - scraping elempleo.com con Selenium -> Google Sheets
+# Sin versiones fijas: comparte el entorno C:\venvs\efe con EFE_Programs_2026 (que fija las versiones).
+selenium>=4.20
+pandas>=2.2,<4
+numpy>=1.26
+gspread>=6.1
+oauth2client==4.1.3
+google-auth>=2.40
+python-dotenv>=1.0
+dateparser>=1.2
+requests>=2.31

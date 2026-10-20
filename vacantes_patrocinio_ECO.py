@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
@@ -45,10 +46,13 @@ DF.columns = (DF.columns
               .str.replace(r"[^a-z0-9_#]", "", regex=True)              
               )
 
+# oct-2026: el encabezado de la columna A llega sin letras (ej. '________'); en BQ es 'vacante'
+if not re.search(r"[a-z]", DF.columns[0]):
+    DF = DF.rename(columns={DF.columns[0]: "vacante"})
 DF = DF.loc[:, ~DF.columns.duplicated()]
 DF['fecha'] = DF['fecha'].apply(lambda x: dateparser.parse(str(x)) if pd.notnull(x) else None)
 DF['fecha'] = DF['fecha'].apply(lambda x: x.strftime('%Y-%m-%d') if pd.notnull(x) else None)
-DF['fecha_de_contacto'] = pd.to_datetime(DF['fecha_de_contacto'], errors="coerce").dt.strftime('%Y-%m-%d')
+DF['fecha_de_contacto'] = pd.to_datetime(DF['fecha_de_contacto'], errors="coerce", dayfirst=True).dt.strftime('%Y-%m-%d')
 
 
 DF['proyecto'] = "Ecolombia 2.0"
