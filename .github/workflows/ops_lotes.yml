@@ -8,9 +8,9 @@ name: OPS · Lotes programados
 run-name: "Lote ${{ inputs.lote || 'programado' }} · ${{ inputs.origen || 'cron' }} · ${{ inputs.request_id }}"
 
 on:
-  # schedule:
-  #   - cron: "0 4 * * *"    # 23:00 Bogotá -> lote nocturno
-  #   - cron: "30 14 * * *"  # 09:30 Bogotá -> bitácoras
+  schedule:
+     - cron: "0 4 * * *"    # 23:00 Bogotá -> lote nocturno
+     - cron: "30 14 * * *"  # 09:30 Bogotá -> bitácoras
   workflow_dispatch:
     inputs:
       lote:
