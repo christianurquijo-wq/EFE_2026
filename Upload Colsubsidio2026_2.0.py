@@ -65,6 +65,11 @@ df.columns = [col if col != "" else f"col_{i}" for i, col in enumerate(df.column
 
 df = df.astype(str)
 
+# oct-2026: en el Sheet renombraron 'Envío pertinencia' -> 'Pertinencia'; BigQuery y los
+# tableros siguen usando envio_pertinencia.
+if 'pertinencia' in df.columns and 'envio_pertinencia' not in df.columns:
+    df = df.rename(columns={'pertinencia': 'envio_pertinencia'})
+
 df['proyecto'] = 'Colsubsidio 2.0 2026'
 df = df.drop(columns='coincide_fecha_inicio')
 print(df.columns.tolist())

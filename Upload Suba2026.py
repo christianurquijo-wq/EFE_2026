@@ -61,6 +61,12 @@ df.columns = (
 
 df = df.loc[:, ~df.columns.duplicated()]
 
+# oct-2026: la limpieza de arriba borra las columnas totalmente vacías. Si
+# estado_empleabilidad queda sin datos en el Sheet, desaparece y BigQuery rechaza la
+# carga (31 vs 30 columnas). Se repone vacía para conservar el esquema.
+if "estado_empleabilidad" not in df.columns:
+    df["estado_empleabilidad"] = None
+
 print(f" Número de filas: {len(df)}")
 print(df.columns.tolist())
 
