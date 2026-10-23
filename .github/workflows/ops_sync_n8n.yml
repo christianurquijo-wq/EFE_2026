@@ -1,0 +1,40 @@
+# EFE_2026 -> .github/workflows/ops_sync_n8n.yml
+# Reemplaza el flujo "OPS - Sync ejecuciones n8n": copia cada hora las ejecuciones de n8n
+# a LOG_EJECUCIONES y avisa por correo si alguna falló (ver ops_sync_n8n.py).
+# Costo: ~1 min de Actions por corrida (~720 min/mes de los 2.000 gratis del plan).
+name: OPS · Sync n8n
+on:
+  schedule:
+    - cron: "7 * * * *"   # cada hora, minuto 7
+  workflow_dispatch:
+
+concurrency:
+  group: ops-sync-n8n
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependencias mínimas
+        run: pip install google-auth requests
+      - name: Restaurar archivos secretos
+        env:
+          SECRETS_BUNDLE: ${{ secrets.SECRETS_BUNDLE }}
+        run: |
+          echo "$SECRETS_BUNDLE" | base64 -d > "$RUNNER_TEMP/s.zip"
+          unzip -oq "$RUNNER_TEMP/s.zip" -d .
+          rm -f "$RUNNER_TEMP/s.zip"
+      - name: Sincronizar ejecuciones de n8n
+        env:
+          OPS_SHEET_ID: ${{ secrets.OPS_SHEET_ID }}
+          OPS_LOG_SA_JSON: ${{ secrets.OPS_LOG_SA_JSON }}
+        run: python ops_sync_n8n.py

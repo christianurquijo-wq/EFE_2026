@@ -12,6 +12,7 @@ scripts_listados = sorted(glob.glob("*.py"))
 
 archivos_excluidos = ['trigger.py',
                       'ops_logger.py',          # ejecutor/bitácora, no es un ETL
+                      'ops_sync_n8n.py',        # sync de n8n: tiene su propio workflow (cada hora)
                       'trigger_bitacora.py',    # las bitácoras ya corren aquí directo; antes se ejecutaban 2 veces
                       'Append Colsubsidio2026.py',
                       'Formacion InAv Suba2026.py',
