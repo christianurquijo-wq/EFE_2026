@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -59,11 +60,26 @@ RAIZ_N8N = API.split("/api/")[0]
 _nombres: dict[str, str] = {}
 
 
+class N8nNoDisponible(Exception):
+    """n8n respondió 5xx o no contestó: el servidor está caído o saturado."""
+
+
 def _get(ruta: str, **params) -> dict:
-    r = requests.get(f"{API}{ruta}", params=params, timeout=30,
-                     headers={"X-N8N-API-KEY": KEY, "Accept": "application/json"})
-    r.raise_for_status()
-    return r.json()
+    """GET a la API con 3 reintentos (5, 15, 30 s) si n8n responde 5xx o no contesta."""
+    for espera in (5, 15, 30, None):
+        try:
+            r = requests.get(f"{API}{ruta}", params=params, timeout=30,
+                             headers={"X-N8N-API-KEY": KEY, "Accept": "application/json"})
+            if r.status_code < 500:
+                r.raise_for_status()  # 4xx (key, URL): error real, sin reintento
+                return r.json()
+            motivo = f"HTTP {r.status_code}"
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            motivo = type(exc).__name__
+        if espera is None:
+            raise N8nNoDisponible(motivo)
+        print(f"[sync n8n] n8n no responde ({motivo}); reintento en {espera} s")
+        time.sleep(espera)
 
 
 def _dt(valor) -> datetime | None:
@@ -79,7 +95,7 @@ def nombre_flujo(wid: str) -> str:
     if wid not in _nombres:
         try:
             _nombres[wid] = _get(f"/workflows/{wid}").get("name") or wid
-        except requests.RequestException:
+        except (requests.RequestException, N8nNoDisponible):
             _nombres[wid] = wid
     return _nombres[wid]
 
@@ -87,8 +103,8 @@ def nombre_flujo(wid: str) -> str:
 def ejecuciones_recientes() -> list[dict]:
     limite = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DIAS)
     salida, cursor = [], None
-    for _ in range(20):  # máx. 2.000 ejecuciones por corrida
-        params = {"limit": 100, **({"cursor": cursor} if cursor else {})}
+    for _ in range(40):  # máx. 2.000 ejecuciones por corrida
+        params = {"limit": 50, **({"cursor": cursor} if cursor else {})}
         pagina = _get("/executions", **params)
         datos = pagina.get("data", [])
         salida += datos
@@ -109,7 +125,7 @@ def ids_registrados() -> set[str]:
 def error_de(ejecucion_id: str, estado: str) -> str:
     try:
         res = (_get(f"/executions/{ejecucion_id}", includeData="true").get("data") or {}).get("resultData") or {}
-    except requests.RequestException:
+    except (requests.RequestException, N8nNoDisponible):
         return f"n8n status: {estado}"
     err = res.get("error") or {}
     nodo = err.get("node", {}).get("name") if isinstance(err.get("node"), dict) else err.get("node")
@@ -162,7 +178,14 @@ def main() -> None:
     if not (API and KEY):
         sys.exit("Faltan N8N_API_URL / N8N_API_KEY (en el .env o como variables de entorno).")
     registrados = ids_registrados()
-    nuevas = [e for e in ejecuciones_recientes()
+    try:
+        recientes = ejecuciones_recientes()
+    except N8nNoDisponible as exc:
+        # n8n caído no es un fallo del sync: la próxima corrida recupera lo pendiente
+        # (mira 3 días hacia atrás). Queda como aviso amarillo en GitHub, no en rojo.
+        print(f"::warning::n8n no disponible ({exc}). Se reintenta en la próxima corrida.")
+        return
+    nuevas = [e for e in recientes
               if str(e.get("status")) in FINALES and e.get("stoppedAt")
               and str(e.get("workflowId")) not in IGNORAR
               and f"n8n-{e.get('id')}" not in registrados]
