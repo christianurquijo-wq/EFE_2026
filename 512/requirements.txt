@@ -1,7 +1,8 @@
-﻿pandas==2.3.3
+pandas==2.3.3
 gspread==6.2.1
 google-auth==2.49.2
 google-cloud-bigquery==3.41.0
 pyarrow==24.0.0
 db-dtypes==1.5.1
 python-dotenv==1.2.2
+oauth2client==4.1.3

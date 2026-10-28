@@ -6,14 +6,18 @@ from dotenv import load_dotenv
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-load_dotenv(override=True)
+# Rutas relativas a esta carpeta: funciona igual desde VS Code, el lote o GitHub Actions.
+BASE = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE, ".env"), override=True)
 
-cred_firebase = credentials.Certificate(r"firebase_credentials.json")
+# Proyecto de Firebase a comparar: firebase_credentials_a.json (el mismo que usa main.py) por defecto.
+# Para otro: FIREBASE_CRED=firebase_credentials_b.json en el .env de esta carpeta.
+cred_firebase = credentials.Certificate(os.path.join(BASE, os.getenv("FIREBASE_CRED", "firebase_credentials_a.json")))
 firebase_admin.initialize_app(cred_firebase)
 db_fs = firestore.client()
 
 db = os.getenv("db")
-json_sheets = "applied-plexus-476714-n0-d7c1f0400cc6.json"
+json_sheets = os.path.join(BASE, "applied-plexus-476714-n0-d7c1f0400cc6.json")
 scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 cred_sheets = ServiceAccountCredentials.from_json_keyfile_name(json_sheets, scope)
 client = gspread.authorize(cred_sheets)
