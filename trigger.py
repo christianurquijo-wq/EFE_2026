@@ -33,11 +33,21 @@ archivos_excluidos = ['trigger.py',
                       ]
 
 script_prioridad = 'Mantenimiento_appends.py'
+# oct-2026: la foto diaria (historial para KPIs por día/semana/mes) va DE ÚLTIMA,
+# cuando todas las tablas Unificado_* ya quedaron actualizadas esa noche.
+script_final = 'Foto_diaria_EFE.py'
 
-scripts_ejecutables = [script_prioridad]
+# oct-2026: BigQuery está en sandbox y borra tablas Y VISTAS a los 60 días. Antes que nada
+# se les extiende la vigencia (las vistas Unificado_* no tenían ningún respaldo).
+script_vigencia = 'Vigencia_sandbox.py'
+
+scripts_ejecutables = [script_vigencia] if os.path.exists(script_vigencia) else []
+scripts_ejecutables.append(script_prioridad)
 for script in scripts_listados:
-    if script not in archivos_excluidos and script != script_prioridad:
+    if script not in archivos_excluidos and script not in (script_prioridad, script_final, script_vigencia):
         scripts_ejecutables.append(script)
+if os.path.exists(script_final):
+    scripts_ejecutables.append(script_final)
 
 print(f"Ejecutando los siguientes códigos: {scripts_ejecutables}. Total: {len(scripts_ejecutables)}")
 
