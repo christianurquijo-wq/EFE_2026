@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -24,6 +25,7 @@ from pydantic import BaseModel
 
 CONCURRENCIA = int(os.getenv("PDF_CONCURRENCIA", "3"))
 TIMEOUT_MS = int(os.getenv("PDF_TIMEOUT_MS", "60000"))
+CARGA_MS = int(os.getenv("PDF_CARGA_MS", "15000"))  # espera máxima de imágenes/fuentes externas
 # Medidas con nombre (A4, Letter…) van como formato; las demás (210mm, 8.5in…) como ancho/alto.
 FORMATOS = {"a4", "a3", "a5", "letter", "legal", "tabloid", "ledger"}
 
@@ -70,18 +72,34 @@ def _medidas(width: Optional[str], height: Optional[str]) -> dict:
     return {"width": w, "height": h if h.lower() not in FORMATOS else w}
 
 
+def _registro(msg: str) -> None:
+    print(f"[crear-pdf] {msg}", flush=True)  # tunel_pdf lo pasa al log de GitHub Actions
+
+
 @app.post("/crear-pdf")
 async def crear_pdf(datos: DatosHTML):
+    _estado["n"] = n = _estado.get("n", 0) + 1
+    llegada = time.time()
+    _registro(f"#{n} recibida · HTML {len(datos.html) / 1024:.0f} KB · PDFs en proceso: {CONCURRENCIA - _estado["turnos"]._value}")
     async with _estado["turnos"]:
+        espera = time.time() - llegada
         for intento in (1, 2):  # si Chromium se cayó a mitad, un segundo intento con uno nuevo
             contexto = None
             try:
                 contexto = await (await _navegador()).new_context()
                 pagina = await contexto.new_page()
-                await pagina.set_content(datos.html, timeout=TIMEOUT_MS)
+                # Se espera el HTML; las imágenes y fuentes externas tienen hasta CARGA_MS para llegar. Si alguna no
+                # llega (Drive lento, enlace roto), se genera el PDF igual en vez de colgar la solicitud.
+                await pagina.set_content(datos.html, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+                try:
+                    await pagina.wait_for_load_state("load", timeout=CARGA_MS)
+                except Exception:  # noqa: BLE001
+                    _registro(f"#{n} recursos externos sin cargar en {CARGA_MS / 1000:.0f} s; se genera igual")
                 pdf = await pagina.pdf(print_background=True, **_medidas(datos.width, datos.height))
+                _registro(f"#{n} PDF {len(pdf) / 1024:.0f} KB en {time.time() - llegada:.1f} s (esperó {espera:.1f} s)")
                 return Response(content=pdf, media_type="application/pdf")
             except Exception as e:  # noqa: BLE001 -- se informa a n8n en lugar de cortar la conexión
+                _registro(f"#{n} intento {intento} falló: {type(e).__name__}: {str(e)[:200]}")
                 if intento == 2:
                     return JSONResponse(status_code=500, content={"error": f"{type(e).__name__}: {str(e)[:300]}"})
             finally:

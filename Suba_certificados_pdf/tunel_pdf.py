@@ -72,7 +72,8 @@ def _drenar(proc: subprocess.Popen, prefijo: str, al_leer=None) -> None:
         linea = linea.rstrip()
         if al_leer:
             al_leer(linea)
-        if any(p in linea for p in ("ERR", "error", "Error", "trycloudflare", "running on", "Uvicorn")):
+        if any(p in linea for p in ("ERR", "error", "Error", "trycloudflare", "running on", "Uvicorn", "[crear-pdf]",
+                                    "Traceback", "Exception")):
             log(f"{prefijo} {linea[:300]}")
 
 
