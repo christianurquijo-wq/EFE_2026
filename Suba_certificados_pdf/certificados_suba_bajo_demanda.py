@@ -48,10 +48,27 @@ def id_del_flujo() -> str:
     return ID_CONOCIDO
 
 
+def revisar(flujo: str) -> None:
+    """python Suba_certificados_pdf/certificados_suba_bajo_demanda.py --revisar
+    Muestra qué nodos de PDF detecta el script y la URL que tienen hoy en n8n (no cambia nada)."""
+    r = requests.get(f"{t.API}/workflows/{flujo}", headers=t.H, timeout=60)
+    print(f"Flujo {flujo}: HTTP {r.status_code}")
+    if not r.ok:
+        sys.exit(r.text[:300])
+    wf = r.json()
+    print(f"{wf.get('name')} · activo: {wf.get('active')}")
+    for n in wf["nodes"]:
+        if n.get("type", "").endswith(".httpRequest"):
+            marca = "PDF ✓" if t._es_nodo_pdf(n) else "     "
+            print(f"  {marca} {n['name']}: {str(n.get('parameters', {}).get('url', ''))[:110]}")
+
+
 def main() -> None:
     if not (t.API and t.KEY):
         sys.exit("Faltan N8N_API_URL / N8N_API_KEY en el .env de EFE.")
     flujo = id_del_flujo()
+    if "--revisar" in sys.argv:
+        return revisar(flujo)
     t.log(f"Flujo de n8n: {NOMBRE_FLUJO} ({flujo})")
     pbd.ejecutar(flujo, int(t._env("SUBA_CERT_TIMEOUT_MIN") or 100),
                  webhook_url=t._env("WEBHOOK_SUBA_CERT_URL") or WEBHOOK, prefijo="WEBHOOK_SUBA_CERT",

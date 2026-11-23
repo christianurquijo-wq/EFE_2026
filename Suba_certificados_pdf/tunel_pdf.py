@@ -164,43 +164,74 @@ def _responde(url: str) -> bool:
 
 
 # ------------------------------------------------------------------ n8n
+# Hosts de túneles temporales: un nodo HTTP que apunte a uno de estos también se actualiza, aunque su ruta no sea
+# exactamente /crear-pdf (se conserva la ruta y se cambia solo el dominio).
+TUNELES = re.compile(r"https?://[^/\s\"']*(trycloudflare\.com|pinggy[^/\s\"']*|ngrok[^/\s\"']*|loca\.lt|serveo\.net)",
+                     re.IGNORECASE)
+
+
+def _es_nodo_pdf(n: dict) -> bool:
+    url = str(n.get("parameters", {}).get("url", ""))
+    return n.get("type", "").endswith(".httpRequest") and ("/crear-pdf" in url or bool(TUNELES.search(url)))
+
+
+def _url_nueva(actual: str, url_tunel: str) -> str:
+    """Misma ruta, dominio del túnel nuevo. Sin dominio de túnel reconocible → {túnel}/crear-pdf."""
+    m = TUNELES.search(actual)
+    if m:
+        ruta = actual[m.end():].split("?")[0].strip() or "/crear-pdf"
+        return f"{url_tunel}{ruta if ruta.startswith('/') else '/' + ruta}"
+    return f"{url_tunel}/crear-pdf"
+
+
 def actualizar_n8n(url_tunel: str, flujo: str | None = None) -> None:
-    """Pone {url_tunel}/crear-pdf en todos los nodos HTTP del flujo que llaman a /crear-pdf."""
+    """Pone la URL del túnel en todos los nodos HTTP del flujo que llaman al servicio de PDF y COMPRUEBA que n8n
+    guardó el cambio. nov-2026: antes, si n8n rechazaba el cambio solo se anotaba en el log y el flujo corría con la
+    URL vieja («The connection cannot be established… incorrect host»). Ahora cualquier falla detiene la ejecución
+    con el motivo, antes de disparar el flujo."""
     flujo = flujo or FLUJO
     if not (API and KEY):
-        log("⚠ Sin N8N_API_URL / N8N_API_KEY: actualiza a mano la URL en el nodo de n8n: "
-            f"{url_tunel}/crear-pdf")
-        return
+        raise RuntimeError("Faltan N8N_API_URL / N8N_API_KEY: no se puede poner la URL del túnel en n8n.")
+    r = requests.get(f"{API}/workflows/{flujo}", headers=H, timeout=60)
+    if not r.ok:
+        raise RuntimeError(f"n8n no entregó el flujo {flujo} (HTTP {r.status_code}): {r.text[:200]}. "
+                           "Revisa que la N8N_API_KEY pueda ver y editar este flujo.")
+    wf = r.json()
+    nodos = [n for n in wf["nodes"] if _es_nodo_pdf(n)]
+    if not nodos:
+        raise RuntimeError(f"El flujo «{wf.get('name')}» no tiene nodos HTTP que llamen al servicio de PDF.")
+    esperadas, cambios = {}, []
+    for n in nodos:
+        p = n["parameters"]
+        nueva = _url_nueva(str(p["url"]), url_tunel)
+        esperadas[n["name"]] = nueva
+        if p["url"] != nueva:
+            cambios.append(f"«{n['name']}»")
+            p["url"] = nueva
+    if cambios:
+        respaldo = LOGS / f"respaldo_flujo_pdf_{flujo}_{datetime.now():%Y%m%d_%H%M%S}.json"
+        respaldo.write_text(json.dumps(wf, ensure_ascii=False), encoding="utf-8")
+        cuerpo = {"name": wf["name"], "nodes": wf["nodes"], "connections": wf["connections"],
+                  "settings": {k: v for k, v in (wf.get("settings") or {}).items() if k in SETTINGS_OK}}
+        r = requests.put(f"{API}/workflows/{flujo}", headers={**H, "Content-Type": "application/json"},
+                         data=json.dumps(cuerpo), timeout=60)
+        if not r.ok:
+            raise RuntimeError(f"n8n rechazó el cambio de URL (HTTP {r.status_code}): {r.text[:300]}")
+        # Que la versión ACTIVA (la que atiende el webhook) sea la recién guardada: se vuelve a activar.
+        if wf.get("active"):
+            requests.post(f"{API}/workflows/{flujo}/deactivate", headers=H, timeout=60)
+            a = requests.post(f"{API}/workflows/{flujo}/activate", headers=H, timeout=60)
+            if not a.ok:
+                raise RuntimeError(f"n8n guardó la URL pero no reactivó el flujo (HTTP {a.status_code}): {a.text[:200]}")
+    # Comprobación: se vuelve a leer el flujo y cada nodo debe tener la URL del túnel nuevo.
     r = requests.get(f"{API}/workflows/{flujo}", headers=H, timeout=60)
     r.raise_for_status()
-    wf = r.json()
-    cambios = []
-    for n in wf["nodes"]:
-        p = n.get("parameters", {})
-        if n["type"].endswith(".httpRequest") and "/crear-pdf" in str(p.get("url", "")):
-            nueva = f"{url_tunel}/crear-pdf"
-            if p["url"] != nueva:
-                cambios.append(f"«{n['name']}»")
-                p["url"] = nueva
-    if not any(n["type"].endswith(".httpRequest") and "/crear-pdf" in str(n.get("parameters", {}).get("url", ""))
-               for n in wf["nodes"]):
-        raise RuntimeError(f"El flujo «{wf.get('name')}» no tiene nodos HTTP que llamen a /crear-pdf.")
-    if not cambios:
-        log("n8n ya tenía la URL vigente; no se cambió nada.")
-        return
-    respaldo = LOGS / f"respaldo_flujo_pdf_{flujo}_{datetime.now():%Y%m%d_%H%M%S}.json"
-    respaldo.write_text(json.dumps(wf, ensure_ascii=False), encoding="utf-8")
-    cuerpo = {"name": wf["name"], "nodes": wf["nodes"], "connections": wf["connections"],
-              "settings": {k: v for k, v in (wf.get("settings") or {}).items() if k in SETTINGS_OK}}
-    r = requests.put(f"{API}/workflows/{flujo}", headers={**H, "Content-Type": "application/json"},
-                     data=json.dumps(cuerpo), timeout=60)
-    if not r.ok:
-        log(f"✖ n8n rechazó el cambio (HTTP {r.status_code}): {r.text[:200]}. "
-            f"Pon a mano {url_tunel}/crear-pdf en {', '.join(cambios)}")
-        return
-    if wf.get("active") and not r.json().get("active"):
-        requests.post(f"{API}/workflows/{flujo}/activate", headers=H, timeout=60)
-    log(f"✔ n8n actualizado ({wf['name']}): {', '.join(cambios)} → {url_tunel}/crear-pdf")
+    guardado = {n["name"]: str(n.get("parameters", {}).get("url", "")) for n in r.json()["nodes"]}
+    mal = [nombre for nombre, url in esperadas.items() if guardado.get(nombre) != url]
+    if mal:
+        raise RuntimeError(f"n8n no guardó la URL del túnel en: {', '.join(mal)}.")
+    log(f"✔ n8n actualizado ({wf['name']}): {len(esperadas)} nodos de PDF → {url_tunel}"
+        + (f" (cambiados: {', '.join(cambios)})" if cambios else " (ya la tenían)"))
     # Respaldos viejos: se conservan los 5 más recientes.
     for viejo in sorted(LOGS.glob("respaldo_flujo_pdf_*.json"))[:-5]:
         viejo.unlink(missing_ok=True)
