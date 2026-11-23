@@ -184,6 +184,18 @@ def _url_nueva(actual: str, url_tunel: str) -> str:
     return f"{url_tunel}/crear-pdf"
 
 
+def _activar(flujo: str) -> dict:
+    """Activa el flujo (el webhook de producción solo existe si está activo) y comprueba que quedó activo."""
+    a = requests.post(f"{API}/workflows/{flujo}/activate", headers=H, timeout=60)
+    if not a.ok:
+        raise RuntimeError(f"n8n no pudo activar el flujo (HTTP {a.status_code}): {a.text[:300]}")
+    estado = requests.get(f"{API}/workflows/{flujo}", headers=H, timeout=60).json()
+    if not estado.get("active"):
+        raise RuntimeError("n8n respondió a la activación pero el flujo sigue inactivo: actívalo a mano en el editor "
+                           "y revisa si muestra algún error de activación.")
+    return estado
+
+
 def actualizar_n8n(url_tunel: str, flujo: str | None = None) -> None:
     """Pone la URL del túnel en todos los nodos HTTP del flujo que llaman al servicio de PDF y COMPRUEBA que n8n
     guardó el cambio. nov-2026: antes, si n8n rechazaba el cambio solo se anotaba en el log y el flujo corría con la
@@ -217,12 +229,16 @@ def actualizar_n8n(url_tunel: str, flujo: str | None = None) -> None:
                          data=json.dumps(cuerpo), timeout=60)
         if not r.ok:
             raise RuntimeError(f"n8n rechazó el cambio de URL (HTTP {r.status_code}): {r.text[:300]}")
-        # Que la versión ACTIVA (la que atiende el webhook) sea la recién guardada: se vuelve a activar.
-        if wf.get("active"):
+        # Que la versión ACTIVA (la que atiende el webhook) sea la recién guardada. nov-2026: desactivar y volver a
+        # activar dejaba el webhook sin registrar unos segundos (n8n respondía 404 «webhook is not registered»), así
+        # que solo se activa encima (publica la versión nueva) y únicamente si n8n reporta otra versión activa se hace
+        # el ciclo completo. disparar_webhook() además reintenta si el webhook aún no está registrado.
+        estado = _activar(flujo)
+        if estado.get("activeVersionId") and estado.get("activeVersionId") != estado.get("versionId"):
             requests.post(f"{API}/workflows/{flujo}/deactivate", headers=H, timeout=60)
-            a = requests.post(f"{API}/workflows/{flujo}/activate", headers=H, timeout=60)
-            if not a.ok:
-                raise RuntimeError(f"n8n guardó la URL pero no reactivó el flujo (HTTP {a.status_code}): {a.text[:200]}")
+            _activar(flujo)
+    elif not wf.get("active"):
+        _activar(flujo)  # sin cambios de URL pero apagado: el webhook del panel solo existe con el flujo activo
     # Comprobación: se vuelve a leer el flujo y cada nodo debe tener la URL del túnel nuevo.
     r = requests.get(f"{API}/workflows/{flujo}", headers=H, timeout=60)
     r.raise_for_status()

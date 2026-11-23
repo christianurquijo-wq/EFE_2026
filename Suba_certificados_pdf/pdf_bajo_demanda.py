@@ -69,15 +69,25 @@ def disparar_webhook(url: str | None, prefijo: str, origen: str, nombre: str) ->
     cuerpo = {"origen": origen, "request_id": os.getenv("OPS_REQUEST_ID", ""),
               "actor": os.getenv("OPS_ACTOR", "")}
     r = None
-    for cab in _cabeceras(prefijo):
-        try:
-            r = requests.post(url, headers=cab, json=cuerpo, timeout=30)
-        except requests.ReadTimeout:
-            break  # el webhook puede responder al final del flujo: la ejecución sigue en n8n
-        if r.status_code not in (401, 403):
-            break  # con 401/403 se prueba la siguiente cabecera
+    fin = time.time() + 90  # tras activar el flujo, n8n tarda unos segundos en registrar el webhook (404)
+    while True:
+        for cab in _cabeceras(prefijo):
+            try:
+                r = requests.post(url, headers=cab, json=cuerpo, timeout=30)
+            except requests.ReadTimeout:
+                r = None
+                break  # el webhook puede responder al final del flujo: la ejecución sigue en n8n
+            if r.status_code not in (401, 403):
+                break  # con 401/403 se prueba la siguiente cabecera
+        if r is None or r.status_code != 404 or time.time() > fin:
+            break
+        t.log("n8n aún no registra el webhook; reintento en 10 s…")
+        time.sleep(10)
     if r is not None and r.status_code >= 400:
         pista = ""
+        if r.status_code == 404:
+            pista = (" · El webhook no está registrado: revisa en n8n que el flujo esté ACTIVO (interruptor arriba a la "
+                     "derecha) y que el nodo «Webhook panel» tenga esa ruta.")
         if r.status_code in (401, 403):
             probadas = ", ".join(next(iter(c), "sin cabecera") for c in _cabeceras(prefijo))
             pista = (f" · Cabeceras probadas: {probadas}. El valor debe ser el mismo de la credencial «OPS X-OPS-TOKEN» "
