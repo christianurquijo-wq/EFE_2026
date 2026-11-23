@@ -45,7 +45,7 @@ def asegurar_cloudflared() -> None:
 
 
 def ultima_ejecucion(flujo: str) -> int:
-    r = requests.get(f"{t.API}/executions", headers=t.H, params={"workflowId": flujo, "limit": 1}, timeout=60)
+    r = t.API_HTTP.get(f"{t.API}/executions", headers=t.H, params={"workflowId": flujo, "limit": 1}, timeout=60)
     r.raise_for_status()
     datos = r.json().get("data", [])
     return int(datos[0]["id"]) if datos else 0
@@ -102,9 +102,12 @@ def esperar(base: int, minutos: int, flujo: str) -> dict:
     fin = time.time() + minutos * 60
     ejecucion = None
     while time.time() < fin:
-        r = requests.get(f"{t.API}/executions", headers=t.H,
-                         params={"workflowId": flujo, "limit": 5}, timeout=60)
-        if r.ok:
+        try:
+            r = t.API_HTTP.get(f"{t.API}/executions", headers=t.H,
+                               params={"workflowId": flujo, "limit": 5}, timeout=t.TIEMPO_API)
+        except requests.RequestException:
+            r = None  # n8n ocupado: se vuelve a consultar en la siguiente vuelta
+        if r is not None and r.ok:
             nuevas = [e for e in r.json().get("data", []) if int(e["id"]) > base]
             if nuevas:
                 ejecucion = min(nuevas, key=lambda e: int(e["id"]))
@@ -117,7 +120,7 @@ def esperar(base: int, minutos: int, flujo: str) -> dict:
 
 def error_de(eid: str, estado: str) -> str:
     try:
-        r = requests.get(f"{t.API}/executions/{eid}", headers=t.H, params={"includeData": "true"}, timeout=60)
+        r = t.API_HTTP.get(f"{t.API}/executions/{eid}", headers=t.H, params={"includeData": "true"}, timeout=60)
         res = ((r.json().get("data") or {}).get("resultData") or {}) if r.ok else {}
     except requests.RequestException:
         res = {}

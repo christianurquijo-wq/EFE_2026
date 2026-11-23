@@ -38,7 +38,7 @@ def id_del_flujo() -> str:
     if t._env("N8N_FLUJO_SUBA_CERTIFICADOS"):
         return t._env("N8N_FLUJO_SUBA_CERTIFICADOS")
     try:
-        r = requests.get(f"{t.API}/workflows", headers=t.H, params={"name": NOMBRE_FLUJO, "limit": 50}, timeout=60)
+        r = t.API_HTTP.get(f"{t.API}/workflows", headers=t.H, params={"name": NOMBRE_FLUJO, "limit": 50}, timeout=60)
         if r.ok:
             candidatos = [w for w in r.json().get("data", []) if w.get("name") == NOMBRE_FLUJO]
             if candidatos:
@@ -51,7 +51,7 @@ def id_del_flujo() -> str:
 def revisar(flujo: str) -> None:
     """python Suba_certificados_pdf/certificados_suba_bajo_demanda.py --revisar
     Muestra qué nodos de PDF detecta el script y la URL que tienen hoy en n8n (no cambia nada)."""
-    r = requests.get(f"{t.API}/workflows/{flujo}", headers=t.H, timeout=60)
+    r = t.API_HTTP.get(f"{t.API}/workflows/{flujo}", headers=t.H, timeout=60)
     print(f"Flujo {flujo}: HTTP {r.status_code}")
     if not r.ok:
         sys.exit(r.text[:300])
@@ -67,13 +67,13 @@ def ultima(flujo: str) -> None:
     """python Suba_certificados_pdf/certificados_suba_bajo_demanda.py --ultima
     Diagnóstico de la última ejecución: estado, nodo que falló, detalle del error, la URL que USÓ cada nodo de PDF
     en esa ejecución (la versión del flujo que corrió n8n) y la URL que tiene hoy el flujo guardado."""
-    r = requests.get(f"{t.API}/executions", headers=t.H, params={"workflowId": flujo, "limit": 1}, timeout=60)
+    r = t.API_HTTP.get(f"{t.API}/executions", headers=t.H, params={"workflowId": flujo, "limit": 1}, timeout=60)
     r.raise_for_status()
     datos = r.json().get("data", [])
     if not datos:
         sys.exit("El flujo no tiene ejecuciones guardadas.")
     eid = datos[0]["id"]
-    e = requests.get(f"{t.API}/executions/{eid}", headers=t.H, params={"includeData": "true"}, timeout=120).json()
+    e = t.API_HTTP.get(f"{t.API}/executions/{eid}", headers=t.H, params={"includeData": "true"}, timeout=120).json()
     print(f"Ejecución {eid} · estado {e.get('status')} · {e.get('startedAt')} → {e.get('stoppedAt')} · modo {e.get('mode')}")
     res = ((e.get("data") or {}).get("resultData") or {})
     err = res.get("error") or {}
@@ -87,7 +87,7 @@ def ultima(flujo: str) -> None:
                 print(f"  ✖ {nombre}: {ce.get('message')} · {str(ce.get('description') or '')[:200]}")
     usados = {n["name"]: str(n.get("parameters", {}).get("url", ""))
               for n in (e.get("workflowData") or {}).get("nodes", []) if t._es_nodo_pdf(n)}
-    hoy = requests.get(f"{t.API}/workflows/{flujo}", headers=t.H, timeout=60).json()
+    hoy = t.API_HTTP.get(f"{t.API}/workflows/{flujo}", headers=t.H, timeout=60).json()
     guardados = {n["name"]: str(n.get("parameters", {}).get("url", "")) for n in hoy["nodes"] if t._es_nodo_pdf(n)}
     print(f"\nVersión que corrió: {(e.get('workflowData') or {}).get('versionId')} · "
           f"guardada hoy: {hoy.get('versionId')} · activa: {hoy.get('activeVersionId', '(no informa)')}")

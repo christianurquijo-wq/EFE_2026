@@ -65,6 +65,25 @@ PUERTO = int(_env("PDF_PUERTO") or 8000)
 H = {"X-N8N-API-KEY": KEY, "Accept": "application/json"}
 
 
+def _sesion_api() -> requests.Session:
+    """Llamadas a la API de n8n con reintentos. nov-2026: n8n a veces tarda más de 60 s en responder (servidor
+    ocupado) y el script caía con «Read timed out». Ahora: hasta 4 reintentos con espera creciente (5, 10, 20 s…)
+    ante timeouts, cortes de conexión y errores 429/5xx. Solo para la API (no para el webhook, que no se repite)."""
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    s = requests.Session()
+    reintentos = Retry(total=4, connect=4, read=4, status=4, backoff_factor=5,
+                       status_forcelist=(429, 500, 502, 503, 504), allowed_methods=frozenset({"GET", "PUT", "POST"}),
+                       raise_on_status=False)
+    s.mount("https://", HTTPAdapter(max_retries=reintentos))
+    s.mount("http://", HTTPAdapter(max_retries=reintentos))
+    return s
+
+
+API_HTTP = _sesion_api()
+TIEMPO_API = 90
+
+
 # ------------------------------------------------------------------ procesos
 def _drenar(proc: subprocess.Popen, prefijo: str, al_leer=None) -> None:
     """Lee la salida del proceso (si no se lee, el proceso se bloquea) y la manda al log."""
@@ -187,10 +206,10 @@ def _url_nueva(actual: str, url_tunel: str) -> str:
 
 def _activar(flujo: str) -> dict:
     """Activa el flujo (el webhook de producción solo existe si está activo) y comprueba que quedó activo."""
-    a = requests.post(f"{API}/workflows/{flujo}/activate", headers=H, timeout=60)
+    a = API_HTTP.post(f"{API}/workflows/{flujo}/activate", headers=H, timeout=TIEMPO_API)
     if not a.ok:
         raise RuntimeError(f"n8n no pudo activar el flujo (HTTP {a.status_code}): {a.text[:300]}")
-    estado = requests.get(f"{API}/workflows/{flujo}", headers=H, timeout=60).json()
+    estado = API_HTTP.get(f"{API}/workflows/{flujo}", headers=H, timeout=TIEMPO_API).json()
     if not estado.get("active"):
         raise RuntimeError("n8n respondió a la activación pero el flujo sigue inactivo: actívalo a mano en el editor "
                            "y revisa si muestra algún error de activación.")
@@ -205,7 +224,7 @@ def actualizar_n8n(url_tunel: str, flujo: str | None = None) -> None:
     flujo = flujo or FLUJO
     if not (API and KEY):
         raise RuntimeError("Faltan N8N_API_URL / N8N_API_KEY: no se puede poner la URL del túnel en n8n.")
-    r = requests.get(f"{API}/workflows/{flujo}", headers=H, timeout=60)
+    r = API_HTTP.get(f"{API}/workflows/{flujo}", headers=H, timeout=TIEMPO_API)
     if not r.ok:
         raise RuntimeError(f"n8n no entregó el flujo {flujo} (HTTP {r.status_code}): {r.text[:200]}. "
                            "Revisa que la N8N_API_KEY pueda ver y editar este flujo.")
@@ -226,8 +245,8 @@ def actualizar_n8n(url_tunel: str, flujo: str | None = None) -> None:
         respaldo.write_text(json.dumps(wf, ensure_ascii=False), encoding="utf-8")
         cuerpo = {"name": wf["name"], "nodes": wf["nodes"], "connections": wf["connections"],
                   "settings": {k: v for k, v in (wf.get("settings") or {}).items() if k in SETTINGS_OK}}
-        r = requests.put(f"{API}/workflows/{flujo}", headers={**H, "Content-Type": "application/json"},
-                         data=json.dumps(cuerpo), timeout=60)
+        r = API_HTTP.put(f"{API}/workflows/{flujo}", headers={**H, "Content-Type": "application/json"},
+                         data=json.dumps(cuerpo), timeout=TIEMPO_API)
         if not r.ok:
             raise RuntimeError(f"n8n rechazó el cambio de URL (HTTP {r.status_code}): {r.text[:300]}")
         # Que la versión ACTIVA (la que atiende el webhook) sea la recién guardada. nov-2026: desactivar y volver a
@@ -236,12 +255,12 @@ def actualizar_n8n(url_tunel: str, flujo: str | None = None) -> None:
         # el ciclo completo. disparar_webhook() además reintenta si el webhook aún no está registrado.
         estado = _activar(flujo)
         if estado.get("activeVersionId") and estado.get("activeVersionId") != estado.get("versionId"):
-            requests.post(f"{API}/workflows/{flujo}/deactivate", headers=H, timeout=60)
+            API_HTTP.post(f"{API}/workflows/{flujo}/deactivate", headers=H, timeout=TIEMPO_API)
             _activar(flujo)
     elif not wf.get("active"):
         _activar(flujo)  # sin cambios de URL pero apagado: el webhook del panel solo existe con el flujo activo
     # Comprobación: se vuelve a leer el flujo y cada nodo debe tener la URL del túnel nuevo.
-    r = requests.get(f"{API}/workflows/{flujo}", headers=H, timeout=60)
+    r = API_HTTP.get(f"{API}/workflows/{flujo}", headers=H, timeout=TIEMPO_API)
     r.raise_for_status()
     guardado = {n["name"]: str(n.get("parameters", {}).get("url", "")) for n in r.json()["nodes"]}
     mal = [nombre for nombre, url in esperadas.items() if guardado.get(nombre) != url]
