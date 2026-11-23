@@ -1,0 +1,8 @@
+# Suba · certificados con PDF bajo demanda (certificados_suba_bajo_demanda.py, pdf_bajo_demanda.py, tunel_pdf.py,
+# main.py). ops_run_script.yml usa este archivo (más liviano que el requirements.txt raíz) e instala Chromium porque
+# aparece playwright.
+fastapi
+uvicorn
+pydantic>=2.13
+playwright==1.62.0
+requests>=2.31
