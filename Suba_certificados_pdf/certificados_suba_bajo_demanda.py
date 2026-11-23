@@ -63,12 +63,46 @@ def revisar(flujo: str) -> None:
             print(f"  {marca} {n['name']}: {str(n.get('parameters', {}).get('url', ''))[:110]}")
 
 
+def ultima(flujo: str) -> None:
+    """python Suba_certificados_pdf/certificados_suba_bajo_demanda.py --ultima
+    Diagnóstico de la última ejecución: estado, nodo que falló, detalle del error, la URL que USÓ cada nodo de PDF
+    en esa ejecución (la versión del flujo que corrió n8n) y la URL que tiene hoy el flujo guardado."""
+    r = requests.get(f"{t.API}/executions", headers=t.H, params={"workflowId": flujo, "limit": 1}, timeout=60)
+    r.raise_for_status()
+    datos = r.json().get("data", [])
+    if not datos:
+        sys.exit("El flujo no tiene ejecuciones guardadas.")
+    eid = datos[0]["id"]
+    e = requests.get(f"{t.API}/executions/{eid}", headers=t.H, params={"includeData": "true"}, timeout=120).json()
+    print(f"Ejecución {eid} · estado {e.get('status')} · {e.get('startedAt')} → {e.get('stoppedAt')} · modo {e.get('mode')}")
+    res = ((e.get("data") or {}).get("resultData") or {})
+    err = res.get("error") or {}
+    print(f"Último nodo: {res.get('lastNodeExecuted')}")
+    print(f"Error: {err.get('message')}\n  detalle: {str(err.get('description') or '')[:300]}"
+          f"\n  código: {err.get('code') or (err.get('context') or {}).get('code') or ''}")
+    for nombre, corridas in (res.get("runData") or {}).items():
+        for c in corridas or []:
+            ce = c.get("error") if isinstance(c, dict) else None
+            if ce:
+                print(f"  ✖ {nombre}: {ce.get('message')} · {str(ce.get('description') or '')[:200]}")
+    usados = {n["name"]: str(n.get("parameters", {}).get("url", ""))
+              for n in (e.get("workflowData") or {}).get("nodes", []) if t._es_nodo_pdf(n)}
+    hoy = requests.get(f"{t.API}/workflows/{flujo}", headers=t.H, timeout=60).json()
+    guardados = {n["name"]: str(n.get("parameters", {}).get("url", "")) for n in hoy["nodes"] if t._es_nodo_pdf(n)}
+    print(f"\nVersión que corrió: {(e.get('workflowData') or {}).get('versionId')} · "
+          f"guardada hoy: {hoy.get('versionId')} · activa: {hoy.get('activeVersionId', '(no informa)')}")
+    for nombre in sorted(set(usados) | set(guardados), key=lambda x: (len(x), x)):
+        print(f"  {nombre}\n     usó:    {usados.get(nombre, '—')}\n     guardada: {guardados.get(nombre, '—')}")
+
+
 def main() -> None:
     if not (t.API and t.KEY):
         sys.exit("Faltan N8N_API_URL / N8N_API_KEY en el .env de EFE.")
     flujo = id_del_flujo()
     if "--revisar" in sys.argv:
         return revisar(flujo)
+    if "--ultima" in sys.argv:
+        return ultima(flujo)
     t.log(f"Flujo de n8n: {NOMBRE_FLUJO} ({flujo})")
     pbd.ejecutar(flujo, int(t._env("SUBA_CERT_TIMEOUT_MIN") or 100),
                  webhook_url=t._env("WEBHOOK_SUBA_CERT_URL") or WEBHOOK, prefijo="WEBHOOK_SUBA_CERT",

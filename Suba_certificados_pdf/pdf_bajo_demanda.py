@@ -77,7 +77,13 @@ def disparar_webhook(url: str | None, prefijo: str, origen: str, nombre: str) ->
         if r.status_code not in (401, 403):
             break  # con 401/403 se prueba la siguiente cabecera
     if r is not None and r.status_code >= 400:
-        raise RuntimeError(f"n8n {r.status_code}: {r.text[:300]}")
+        pista = ""
+        if r.status_code in (401, 403):
+            probadas = ", ".join(next(iter(c), "sin cabecera") for c in _cabeceras(prefijo))
+            pista = (f" · Cabeceras probadas: {probadas}. El valor debe ser el mismo de la credencial «OPS X-OPS-TOKEN» "
+                     "de n8n (el n8n_token del panel): secret OPS_ALERT_TOKEN del repo o "
+                     f"{prefijo}_HEADER_NOMBRE / _VALOR en el .env.")
+        raise RuntimeError(f"n8n {r.status_code}: {r.text[:300]}{pista}")
     t.log(f"Flujo de {nombre} disparado en n8n.")
 
 
